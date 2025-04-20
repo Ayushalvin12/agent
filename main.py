@@ -16,8 +16,6 @@ class ResearchResponse(BaseModel):
     sources: list[str]
     tools_used: list[str]
 
-
-# llm = ChatAnthropic(model = "claude-3-5-sonnet-20241022")
 llm = ChatOllama(model = "llama3.2")
 parser = PydanticOutputParser(pydantic_object=ResearchResponse)
 
@@ -50,55 +48,36 @@ prompt = ChatPromptTemplate.from_messages(
     ]
 ).partial(format_instructions=parser.get_format_instructions())
 
-tools = [
-    search_tool, wiki_tool, save_tool
-]
-agent = create_tool_calling_agent(
-    llm=llm,
-    prompt=prompt,
-    tools=tools
-)
-
+tools = [search_tool, wiki_tool, save_tool]
+agent = create_tool_calling_agent(llm=llm, prompt=prompt, tools=tools)
 agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
-query = input("What can i help you research? ")
+
+query = input("What can I help you research? ")
 raw_response = agent_executor.invoke({"query": query})
 
 try:
-    # Checking if the output is already a string (direct JSON)
+    # Handle string output (direct JSON)
     if isinstance(raw_response.get("output"), str):
         json_str = raw_response.get("output")
         structured_response = json.loads(json_str)
-        print(structured_response)
-    # Checking if the output is in the expected format from previous versions
-    elif isinstance(raw_response.get("output"), list) and len(raw_response.get("output")) > 0:
+    # Handle list output format
+    elif isinstance(raw_response.get("output"), list) and raw_response.get("output"):
         text_content = raw_response.get("output")[0]["text"]
         structured_response = parser.parse(text_content)
-        print(structured_response)
+    # Fallback to raw output
     else:
-        print("Unexpected response format:", raw_response)
-except Exception as e:
-    # more detailed error information
-    print("Error parsing response:", e)
-    print("Raw Response Type:", type(raw_response.get("output")))
-    print("Raw Response Content:", raw_response.get("output"))
+        structured_response = raw_response.get("output")
+        
+    # Print the structured response
+    print(json.dumps(structured_response, indent=2))
     
-    # Trying to extract directly from the response if parsing fails
-    try:
-        if isinstance(raw_response.get("output"), str):
-            json_str = raw_response.get("output")
-            parsed_json = json.loads(json_str)
-            print("\nSuccessfully parsed JSON:")
-            print(parsed_json)
-        # If raw_response is a complex object, try to extract JSON
-        elif isinstance(raw_response.get("output"), list) and len(raw_response.get("output")) > 0:
-            text_content = raw_response.get("output")[0]["text"]
-            # Try to extract JSON part if it exists
-            if '{' in text_content and '}' in text_content:
-                json_start = text_content.find('{')
-                json_end = text_content.rfind('}') + 1
-                json_str = text_content[json_start:json_end]
-                print("\nAttempting to parse extracted JSON:")
-                parsed_json = json.loads(json_str)
-                print(parsed_json)
-    except Exception as inner_e:
-        print("Failed to extract JSON:", inner_e)
+    # Save the research data to file
+    save_data = json.dumps(structured_response, indent=2)
+    save_tool.func(save_data)
+    print("Research data saved to file successfully.")
+        
+except Exception as e:
+    print(f"Error processing response: {e}")
+    # Save raw response as fallback
+    save_tool.func(str(raw_response))
+    print("Saved raw response to file as fallback.")
