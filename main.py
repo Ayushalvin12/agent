@@ -56,28 +56,45 @@ query = input("What can I help you research? ")
 raw_response = agent_executor.invoke({"query": query})
 
 try:
-    # Handle string output (direct JSON)
+    # Parsing the the response
     if isinstance(raw_response.get("output"), str):
-        json_str = raw_response.get("output")
-        structured_response = json.loads(json_str)
-    # Handle list output format
+        structured_response = json.loads(raw_response.get("output"))
     elif isinstance(raw_response.get("output"), list) and raw_response.get("output"):
         text_content = raw_response.get("output")[0]["text"]
         structured_response = parser.parse(text_content)
-    # Fallback to raw output
     else:
         structured_response = raw_response.get("output")
-        
-    # Print the structured response
+    
     print(json.dumps(structured_response, indent=2))
     
-    # Save the research data to file
-    save_data = json.dumps(structured_response, indent=2)
-    save_tool.func(save_data)
-    print("Research data saved to file successfully.")
-        
+    # tracking which tools were actually used
+    actual_tools_used = []
+    if "intermediate_steps" in raw_response:
+        for step in raw_response["intermediate_steps"]:
+            if len(step) >= 1 and hasattr(step[0], "tool"):
+                tool_name = step[0].tool
+                if tool_name not in actual_tools_used:
+                    actual_tools_used.append(tool_name)
+    
+    # Update tools_used with actual tools
+    if actual_tools_used and isinstance(structured_response, dict):
+        structured_response["tools_used"] = actual_tools_used
+    
+    # saving to a file
+    save_tool.func(json.dumps(structured_response, indent=2))
+    print("Research data saved successfully.")
+    
 except Exception as e:
-    print(f"Error processing response: {e}")
-    # Save raw response as fallback
-    save_tool.func(str(raw_response))
-    print("Saved raw response to file as fallback.")
+    print(f"Error: {e}")
+    # Basic fallback - to save whatever it can
+    try:
+        output = raw_response.get("output")
+        if isinstance(output, str) and "{" in output and "}" in output:
+            json_start = output.find('{')
+            json_end = output.rfind('}') + 1
+            json_str = output[json_start:json_end]
+            save_tool.func(json_str)
+        else:
+            save_tool.func(str(output))
+    except:
+        print("Could not save research data.")
